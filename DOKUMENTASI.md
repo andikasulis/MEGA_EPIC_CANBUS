@@ -1,9 +1,8 @@
 # DOKUMENTASI LENGKAP: MEGA_EPIC_CANBUS
 
-**Versi:** 1.0 — Phase 1  
+**Versi:** 2.0 — Phase 1 + Merge GearIndicatorCan  
 **Platform:** Arduino Mega2560 + MCP2515 CAN Shield  
-**Protokol:** EPIC_CAN_BUS @ 500 kbps  
-**Penulis:** Gennady Gurov (untuk epicEFI project)
+**Protokol:** EPIC_CAN_BUS @ 500 kbps + rusEFI Wideband CAN (0x190/0x191)
 
 ---
 
@@ -68,9 +67,30 @@
     - 12.2. Main Loop Breakdown
     - 12.3. CAN RX Handler
     - 12.4. VSS Rate Calculation
-13. [POTENSIAL MASALAH & BUG](#13-potensial-masalah--bug)
-14. [ROADMAP & STATUS](#14-roadmap--status)
-15. [REFERENSI](#15-referensi)
+13. [MODUL GEAR DETECTION](#13-modul-gear-detection)
+    - 13.1. Pin Mapping
+    - 13.2. Logika Deteksi
+    - 13.3. Validasi
+    - 13.4. CAN Transmission
+14. [AFR DATABOX VIA SERIAL3](#14-afr-databox-via-serial3)
+    - 14.1. Protocol Databox BRT
+    - 14.2. Frame Format
+    - 14.3. State Machine Reconnect
+    - 14.4. Probe Temperature Calculation
+    - 14.5. Pin Allocation
+15. [rusEFI WIDEBAND CAN PROTOCOL](#15-rusefi-wideband-can-protocol)
+    - 15.1. Frame 0x190 — Lambda & Temperature
+    - 15.2. Frame 0x191 — Diagnostic
+    - 15.3. Byte Order (Little Endian)
+    - 15.4. Valid Flag & Error Handling
+16. [CAN ERROR HANDLING](#16-can-error-handling)
+    - 16.1. Clock Fallback
+    - 16.2. Auto Re-init
+    - 16.3. Max Retry & Recovery
+    - 16.4. Rate-Limited Logging
+17. [POTENSIAL MASALAH & BUG](#17-potensial-masalah--bug)
+18. [ROADMAP & STATUS](#18-roadmap--status)
+19. [REFERENSI](#19-referensi)
 
 ---
 
@@ -82,9 +102,11 @@ MEGA_EPIC_CANBUS adalah **firmware Arduino Mega2560** yang berfungsi sebagai **m
 
 **Kemampuan I/O:**
 - 16 analog input (A0–A15, 0–5V)
-- 16 digital input pushbutton (D22–D37, INPUT_PULLUP, inverted logic)
+- 5 gear selector input (D22–D26, N/1/2/3/4)
+- 11 digital input pushbutton (D27–D37, INPUT_PULLUP, inverted logic)
 - 4 VSS wheel speed sensor (D18–D21, interrupt-driven)
 - 1 GPS receiver (Serial2, NMEA-0183)
+- 1 AFR wideband Databox (Serial3/D14-D15, 57600 baud)
 - 8 slow GPIO output (D39–D43, D47–D49)
 - 10 PWM output (D3, D5–D8, D11, D12, D44–D46)
 
@@ -1356,14 +1378,33 @@ Semua hash adalah CRC32-based signed int32. Hash konsisten antara firmware Mega 
 | A14 | MEGA_EPIC_1_A14 | -1821826348 | 0x934F1394 |
 | A15 | MEGA_EPIC_1_A15 | -1821826347 | 0x934F1395 |
 
-### 11.2. Digital Input
+### 11.2. Gear & Digital Input
 
-| Pin | Nama Variabel | Hash (int32) | Hash (hex) |
-|-----|--------------|--------------|------------|
-| D22-D37 | MEGA_EPIC_1_D20_D34 | 2136453598* | 0x7F5EAD9E* |
-| (firmware) | — | **2138825443** | **0x7F7EBD23** |
+| Pin | Nama Variabel | Hash (int32) | Hash (hex) | Bits |
+|-----|--------------|--------------|------------|------|
+| D22-D26 | detectedGear | **283558758** | **0x10E7C366** | uint8: 0=N,1=G1,2=G2,3=G3,4=G4,255=inv |
+| D27-D37 | MEGA_EPIC_1_D20_D34 | 2136453598 | 0x7F5EAD9E | bits 5-15 (11-bit bitfield) |
 
-*⚠️ Ketidaksesuaian — lihat [Potensial Masalah & Bug](#13-potensial-masalah--bug)
+**detectedGear** — hash resmi dari epicEFI. Nilai: 0=N, 1=G1, 2=G2, 3=G3, 4=G4, 255=invalid.
+
+**MEGA_EPIC_1_D20_D34** — menggunakan hash existing yang sudah ada di epicEFI. Bitfield:
+- Bit 0-1: D20-D21 (VSS, selalu 0)
+- Bit 2-4: D22-D26 (gear, selalu 0)
+- Bit 5-15: D27-D37 (11-bit digital button inputs)
+
+```cpp
+// Bit packing: D27-D37 masuk ke bit 5-15
+for (uint8_t pin = 27; pin <= 37; ++pin) {
+    uint8_t bitIndex = (uint8_t)(pin - 27);  // 0-10
+    if (digitalRead(pin) == LOW) {
+        bits |= (uint16_t)(1u << (bitIndex + 5));  // Shift ke bit 5-15
+    }
+}
+```
+
+**Tidak perlu hash baru** — reuse hash `MEGA_EPIC_1_D20_D34` yang sudah ada di epicEFI firmware.
+
+**Perubahan dari versi sebelumnya:** D22-D26 (5 pin) dialihkan dari digital input bitfield ke gear selector. Bitfield digital input dikurangi dari 16-bit menjadi 11-bit (D27-D37). Hash diubah dari `2136453598` (MEGA_EPIC_1_D20_D34) menjadi `2138825443` (MEGA_EPIC_1_D27_D37).
 
 ### 11.3. VSS Channels
 
@@ -1392,6 +1433,7 @@ Semua hash adalah CRC32-based signed int32. Hash konsisten antara firmware Mega 
 | Nama | Hash (int32) | Hash (hex) | Bits |
 |------|--------------|------------|------|
 | MEGA_EPIC_1_OUT_SLOW | 1430780106 | 0x5544330A | 0-17 (uint32_t) |
+| **detectedGear** | **283558758** | **0x10E7C366** | **uint8: 0=N,1=G1,2=G2,3=G3,4=G4,255=inv** |
 
 **Bit allocation:**
 - Bit 0-7: Slow GPIO (D39-D43, D47-D49)
@@ -1567,39 +1609,339 @@ void calculateVSSRates() {
 
 ---
 
-## 13. POTENSIAL MASALAH & BUG
+## 13. MODUL GEAR DETECTION
 
-### 13.1. Variable Hash Mismatch
+Fitur gear position detection di-porting dari `GearIndicatorCan` untuk mendeteksi posisi gigi transmisi manual (N, 1, 2, 3, 4) menggunakan 5 switch input.
 
-**Lokasi:** `mega_epic_canbus.ino:88` vs `variables.json:84`
+### 13.1. Pin Mapping
 
-| Sumber | Nama Variabel | Hash | Range Pin |
-|--------|--------------|------|-----------|
-| Firmware | (inline) | 2138825443 | D22-D37 |
-| `variables.json` | MEGA_EPIC_1_D20_D34 | **2136453598** | D20-D34 |
+| Gear | Pin Mega2560 | Logic | Catatan |
+|------|-------------|-------|---------|
+| Neutral | **D22** | INPUT_PULLUP, active LOW | Grounded = Netral aktif |
+| Gear 1 | **D23** | INPUT_PULLUP, active LOW | Grounded = Gigi 1 |
+| Gear 2 | **D24** | INPUT_PULLUP, active LOW | Grounded = Gigi 2 |
+| Gear 3 | **D25** | INPUT_PULLUP, active LOW | Grounded = Gigi 3 |
+| Gear 4 | **D26** | INPUT_PULLUP, active LOW | Grounded = Gigi 4 |
 
-**Issue:** Nama variabel di ECU adalah `MEGA_EPIC_1_D20_D34` (pin D20-D34), tapi firmware membaca D22-D37. Dua masalah:
-1. Range pin tidak cocok (D20 vs D22, D34 vs D37)
-2. Hash berbeda → ECU tidak akan mengenali variable_set dari Mega
+### 13.2. Logika Deteksi
 
-**Rekomendasi:** Verifikasi dengan epicEFI team mana yang benar, konsistenkan.
+```cpp
+static GearState readGearState() {
+    uint8_t mask = 0;
+    if (digitalRead(GEAR_N_PIN) == LOW) mask |= 0x01;
+    if (digitalRead(GEAR_1_PIN) == LOW) mask |= 0x02;
+    if (digitalRead(GEAR_2_PIN) == LOW) mask |= 0x04;
+    if (digitalRead(GEAR_3_PIN) == LOW) mask |= 0x08;
+    if (digitalRead(GEAR_4_PIN) == LOW) mask |= 0x10;
 
-### 13.2. nmeaGetField() Edge Case
+    // Manual popcount — AVR GCC tidak punya __builtin_popcount
+    uint8_t count = 0;
+    uint8_t m = mask;
+    while (m) { count += m & 1; m >>= 1; }
+
+    if (count != 1) return {kInvalid, mask};
+
+    if (mask & 0x01) return {kNeutral, mask};
+    if (mask & 0x02) return {kGear1, mask};
+    if (mask & 0x04) return {kGear2, mask};
+    if (mask & 0x08) return {kGear3, mask};
+    return {kGear4, mask};
+}
+```
+
+### 13.3. Validasi
+
+Hanya **1 dari 5 pin** boleh aktif (LOW) dalam satu waktu. Jika:
+- **0 pin aktif** → semua switch open → tidak ada gigi → `kInvalid`
+- **2+ pin aktif** → multiple switch error → `kInvalid`
+- **Tepat 1 pin aktif** → gigi valid
+
+Ini mencegah false reading dari multiple switch yang tertekan bersamaan.
+
+### 13.4. CAN Transmission
+
+Gear dikirim sebagai variable_set EPIC dengan hash resmi `detectedGear` (`283558758`):
+
+| Nilai | Arti |
+|-------|------|
+| 0 | Neutral |
+| 1 | Gigi 1 |
+| 2 | Gigi 2 |
+| 3 | Gigi 3 |
+| 4 | Gigi 4 |
+| 0xFF (255) | Invalid/error |
+
+Menggunakan smart transmission yang sama dengan channel lain: 25ms jika berubah, 500ms heartbeat jika stabil.
+
+---
+
+## 14. AFR DATABOX VIA SERIAL3
+
+Modul DataboxManager membaca data AFR (Air Fuel Ratio) dari wideband controller BRT/Databox melalui Serial3 (D14/D15) pada 57600 baud.
+
+### 14.1. Protocol Databox BRT
+
+Protocol proprietary BRT (Bosch Regulated Tuner) menggunakan UART asynchronous dengan command-response dan streaming data.
+
+**Command Sequence (handshake):**
+```
+Step 1: Send "3649" (STOP)         → Stop any existing stream
+Step 2: Send "3640;00" (START_MAIN)→ Start main data output
+Step 3: Send "3648" (START_STREAM) → Start continuous streaming
+```
+
+Setelah handshake sukses, controller mengirim frame hex 32 karakter setiap ~10ms.
+
+### 14.2. Frame Format
+
+Frame dimulai dengan signature `"3628"` diikuti 28 karakter hex:
+
+```
+Position  Content     Length  Parsing
+────────  ──────────  ──────  ─────────────────
+[0-3]     Signature   4       "3628" — frame identifier
+[4-7]     AFR         4       Hex → uint16 → /100  (contoh: 0E74 = 3700 → 37.00 AFR)
+[8-11]    RPM         4       Hex → uint16          (contoh: 05DC = 1500 RPM)
+[12-13]   TPS         2       Hex → uint8           (contoh: 3C = 60%)
+[14-16]   EOT         3       Hex → uint16 → /10    (contoh: 1F4 = 500 → 50.0°C)
+[17-19]   Vbatt       3       Hex → uint16 → /100   (contoh: 10E = 270 → 2.70V)
+[20-22]   Ur          3       Hex → uint16 → /1000  (voltage ratio untuk temp probe)
+[23-26]   Duty        4       Hex → uint16 → /100   (heater duty cycle %)
+[27-28]   Status      2       Raw 2-char string     (contoh: "00" = OK)
+[29-31]   UrCal       3       Hex → uint16 → /1000  (calibrated Ur)
+```
+
+**Contoh frame:** `36280E7405DC3C1F410E03E8006400001F4`
+```
+AFR=0E74h/100=37.00, RPM=05DCh=1500, TPS=3Ch=60%, EOT=1F4h/10=50.0°C,
+Vbatt=0E0h/100=2.24V, Ur=3E8h/1000=1.000, Duty=0064h/100=1.00%,
+Status="00", UrCal=1F4h/1000=0.500
+```
+
+### 14.3. State Machine Reconnect
+
+```
+IDLE → SEND_STOP → WAIT_STOP (50ms)
+                        │
+                        ▼
+                  SEND_START_MAIN → WAIT_START_MAIN (50ms)
+                                        │
+                                        ▼
+                                  SEND_START_STREAM → WAITING_RETRY (2s timeout)
+                                                            │
+                                              ┌─────────────┴─────────────┐
+                                              ▼                         ▼
+                                        CONNECTED              Retry timeout → SEND_STOP
+                                              │
+                                              │ 5s tanpa data
+                                              ▼
+                                        SEND_STOP (timeout)
+```
+
+**Komponen non-blocking:**
+- `CMD_GAP_MS = 50ms` — jeda antar command
+- `RECONNECT_RETRY_DELAY = 2000ms` — timeout tunggu streaming
+- `DATABOX_TIMEOUT_MS = 5000ms` — timeout data
+- `pumpData()` — membaca max 64 byte per iterasi loop
+
+**AFR Validation:** Hanya AFR dalam range 7.0 – 80.0 yang diterima. Nilai di luar range dianggap invalid/sensor belum ready.
+
+### 14.4. Probe Temperature Calculation
+
+Temperatur probe dihitung dari Ur (voltage ratio) menggunakan lookup table dengan interpolasi linear:
+
+```cpp
+Resistansi = Ur × 300.0
+
+Lookup Table:
+  Res (Ω)  |  2200 |  550  |  300  |  260  |  160  |  80
+  Temp (°C)|  600  |  700  |  780  |  800  |  900  | 1000
+
+Interpolasi linear antara dua titik terdekat.
+```
+
+Range: 600°C – 1000°C. Di luar range dikembalikan nilai boundary terdekat.
+
+### 14.5. Pin Allocation
+
+| Mega2560 Pin | Fungsi | Koneksi |
+|-------------|--------|---------|
+| **D14** (TX3) | Serial3 TX → Databox RX | Kirim command ke AFR controller |
+| **D15** (RX3) | Serial3 RX ← Databox TX | Terima frame AFR dari controller |
+| GND | Ground | Common ground |
+
+**Wiring:**
+```
+AFR Controller TX → Mega D15 (RX3)
+AFR Controller RX ← Mega D14 (TX3)
+GND               ←→ GND
+```
+
+---
+
+## 15. rusEFI WIDEBAND CAN PROTOCOL
+
+Modul ini mengirim data AFR yang dibaca dari Databox ke CAN bus menggunakan protocol **rusEFI Native Wideband** pada 2 CAN ID: `0x190` dan `0x191`.
+
+### 15.1. Frame 0x190 — Lambda & Temperature
+
+```
+DLC: 8
+Byte:   [0]     [1]        [2-3]               [4-5]         [6-7]
+Field: Version  ValidFlag  Lambda (uint16)      Temp °C (u16) Pad
+Order:                     Little Endian        Little Endian
+```
+
+| Field | Deskripsi |
+|-------|-----------|
+| Version `[0]` | `0xA0` — protocol version |
+| ValidFlag `[1]` | `0x01` = valid, `0x00` = invalid/sensor off |
+| Lambda `[2-3]` | `(AFR / 14.7) × 10000`, LSB first |
+| Temp °C `[4-5]` | Probe temperature dari Ur lookup, LSB first |
+
+**Contoh:** AFR 14.7, Temp 780°C
+```
+[0xA0] [0x01] [0xE8 0x03] [0x0C 0x03] [0x00 0x00]
+  Ver    Valid  Lambda=10000  Temp=780    Pad
+                (14.7/14.7)   (780=0x030C)
+                ×10000=10000
+```
+
+### 15.2. Frame 0x191 — Diagnostic
+
+```
+DLC: 8
+Byte:   [0-1]    [2-3]      [4]       [5]      [6]      [7]
+Field:  ESR     NernstDC   PumpDuty  Status  HeaterDuty Reserved
+```
+
+| Field | Deskripsi |
+|-------|-----------|
+| ESR `[0-1]` | Element resistance (dummy 0) |
+| NernstDC `[2-3]` | Nernst DC (dummy 0) |
+| PumpDuty `[4]` | Pump duty cycle (dummy 0) |
+| Status `[5]` | `0x01` = OK/Heating done, `0x00` = Error |
+| HeaterDuty `[6]` | Heater duty cycle 0-100% (dari frame Databox) |
+
+### 15.3. Byte Order (Little Endian)
+
+**⚠️ PENTING:** Protocol rusEFI Wideband menggunakan **Little Endian**, BERBEDA dengan EPIC_CAN_BUS yang menggunakan **Big Endian**.
+
+```cpp
+// Little Endian: LSB first
+frame.data[2] = lambda_val & 0xFF;          // LSB
+frame.data[3] = (lambda_val >> 8) & 0xFF;   // MSB
+
+// Bandingkan dengan EPIC Big Endian:
+out[0] = (value >> 24) & 0xFF;  // MSB first
+out[3] = value & 0xFF;          // LSB last
+```
+
+### 15.4. Valid Flag & Error Handling
+
+- `ValidFlag = 0x01` → data AFR valid, ECU wajib memproses
+- `ValidFlag = 0x00` → sensor tidak terhubung atau timeout
+- Frame `0x191` `Status = 0x00` → error/tidak siap
+- Dikirim setiap **10ms** (WIDEBAND_SEND_INTERVAL_MS), sesuai spesifikasi rusEFI `WBO_TX_PERIOD_MS`
+
+Jika Databox tidak terhubung, kedua frame tetap dikirim dengan ValidFlag = 0 dan semua data 0. Ini penting agar ECU tidak menganggap sensor timeout.
+
+---
+
+## 16. CAN ERROR HANDLING
+
+Modul error handling di-porting dari GearIndicatorCan untuk meningkatkan robustness inisialisasi CAN.
+
+### 16.1. Clock Fallback
+
+MCP2515 bisa menggunakan crystal 8MHz atau 16MHz tergantung shield. Firmware mencoba kedua clock:
+
+```cpp
+static bool initializeCanController() {
+    if (setupCan(MCP_16MHZ)) return true;  // Coba 16MHz dulu
+    if (setupCan(MCP_8MHZ)) return true;   // Gagal → fallback 8MHz
+    return false;                           // Kedua gagal
+}
+```
+
+### 16.2. Auto Re-init
+
+Jika inisialisasi CAN gagal, firmware akan mencoba ulang setiap 3 detik:
+
+```cpp
+if (!canReady) {
+    if ((now - lastCanInitAttemptAt) >= CAN_REINIT_INTERVAL_MS) {
+        canReady = initializeCanController();
+    }
+    delay(100);
+    return;  // Skip loop body
+}
+```
+
+### 16.3. Max Retry & Recovery
+
+Setelah 3 kali percobaan gagal berturut-turut, CAN dianggap rusak permanen. Firmware **tetap berjalan** tanpa CAN — GPS dan Serial3/Databox tetap aktif:
+
+```cpp
+if (canInitFailureCycles >= CAN_REINIT_MAX_CYCLES) {
+    Serial.println("[CAN] Max retries reached, CAN disabled");
+    // Continue without CAN
+}
+```
+
+Ini berbeda dengan GearIndicatorCan yang melakukan `ESP.restart()`. Mega2560 tidak punya restart otomatis, jadi firmware lanjut dengan fitur non-CAN.
+
+### 16.4. Rate-Limited Logging
+
+Error CAN hanya dicetak setiap `ERROR_LOG_INTERVAL_MS` (2 detik) untuk mencegah spam Serial:
+
+```cpp
+static unsigned long lastErrorLogAt = 0;
+if ((now - lastErrorLogAt) >= ERROR_LOG_INTERVAL_MS) {
+    Serial.print("CAN error flags: 0x");
+    Serial.println(CAN0.getErrorFlags(), HEX);
+    lastErrorLogAt = now;
+}
+```
+
+---
+
+## 17. POTENSIAL MASALAH & BUG
+
+### 17.1. Gear Hash Placeholder
+
+**Lokasi:** `mega_epic_canbus.ino` / `variables.json`
+
+Hash `VAR_HASH_GEAR = 283558758` adalah hash resmi untuk variable `detectedGear` dari epicEFI. Sudah terdaftar dan siap digunakan.
+
+**Tidak ada masalah** — hash sudah valid.
+
+### 17.2. Digital Input Bitfield — D20_D34 vs D22_D37
+
+**Lokasi:** `mega_epic_canbus.ino` vs `variables.json`
+
+| Sumber | Nama | Hash | Bit Mapping |
+|--------|------|------|-------------|
+| Firmware v2 | MEGA_EPIC_1_D20_D34 | 2136453598 | Bits 5-15 (D27-D37), bits 0-4 always 0 |
+| epicEFI | MEGA_EPIC_1_D20_D34 | 2136453598 | Bits 0-14 (D20-D34) |
+
+**Issue:** Firmware mengirim D27-D37 di bit 5-15, tapi epicEFI mengharapkan D20-D34 di bit 0-14. Bit 0-4 selalu 0 karena D22-D26 sekarang gear, D20-D21 VSS. ECU tetap menerima data — bit 5-15 berisi nilai digital input D27-D37 yang valid.
+
+**Status:** ✅ Tidak ada masalah — hash reusable, tidak perlu hash baru. ECU menerima 11-bit data meskipun bit 0-4 kosong.
+
+### 17.3. nmeaGetField() Edge Case
 
 **Lokasi:** `nmea_parser.cpp:112-155`
 
 ```cpp
 const char* nmeaGetField(const char* sentence, uint8_t fieldIndex) {
-    // ...
     while (*p) {
         if (*p == ',' || *p == '*') {
-            // Field end detection
             // ...
         } else {
             p++;
         }
     }
-    // Check last field (no trailing delimiter)
     if (currentField == fieldIndex && fieldStart < p) {
         return fieldStart;
     }
@@ -1609,27 +1951,27 @@ const char* nmeaGetField(const char* sentence, uint8_t fieldIndex) {
 
 **Issue:** Ketika field terakhir tidak memiliki trailing delimiter (`*` atau `,`), pointer `p` bisa melampaui string jika field berada di akhir sentence tanpa checksum. Return pointer bisa ke memory out-of-bounds.
 
-### 13.3. GPS Float Packing Precision
+### 17.4. GPS Float Packing Precision
 
-**Lokasi:** `mega_epic_canbus.ino:464-485`
+**Lokasi:** `mega_epic_canbus.ino`
 
 `packGPSHMSD()` dan `packGPSMYQSAT()` mengembalikan `uint32_t`, tapi nilai ini disimpan sebagai `float` di `TxChannelState.lastTransmittedValue`:
 
 ```cpp
-gpsTxState[0].lastTransmittedValue = value;  // value is uint32_t cast to float
+gpsTxState[0].lastTransmittedValue = value;
 ```
 
 **Issue:** uint32_t > 16,777,216 (2²⁴) tidak bisa direpresentasikan secara presisi oleh float32 IEEE 754. Packed value seperti `0xA57FB014` (2,777,870,356) akan kehilangan presisi saat disimpan sebagai float.
 
-### 13.4. PWM Output Hanya On/Off
+### 17.5. PWM Output Hanya On/Off
 
-**Lokasi:** `mega_epic_canbus.ino:847-856`
+**Lokasi:** `mega_epic_canbus.ino`
 
 ```cpp
 if (rawBits & (1u << bitIndex)) {
-    analogWrite(pin, 255);  // 100%
+    analogWrite(pin, 255);
 } else {
-    analogWrite(pin, 0);    // 0%
+    analogWrite(pin, 0);
 }
 ```
 
@@ -1637,9 +1979,9 @@ if (rawBits & (1u << bitIndex)) {
 
 **Rekomendasi:** Implementasi duty cycle penuh menggunakan nilai float dari ECU.
 
-### 13.5. CAN RX Masih Polling
+### 17.6. CAN RX Masih Polling
 
-**Lokasi:** `mega_epic_canbus.ino:866-868`
+**Lokasi:** `mega_epic_canbus.ino`
 
 ```cpp
 while (CAN.readMessage(&rxMsg) == MCP2515::ERROR_OK) {
@@ -1651,9 +1993,36 @@ while (CAN.readMessage(&rxMsg) == MCP2515::ERROR_OK) {
 
 **Rekomendasi:** Implementasi interrupt-driven CAN RX menggunakan pin INT (D2).
 
-### 13.6. VSS Overflow Reset Paksa
+### 17.7. CAN Filter Promiscuous
 
-**Lokasi:** `mega_epic_canbus.ino:688-696`
+**Lokasi:** `mega_epic_canbus.ino:configureCANFilters()`
+
+```cpp
+CAN.setFilterMask(MASK0, false, 0x000);
+```
+
+**Issue:** Karena perlu menerima CAN ID `0x190` (Wideband) dan `0x721` (EPIC response), filter di-set promiscuous (accept all). Ini berarti Mega akan memproses semua frame CAN di bus, meningkatkan CPU load.
+
+**Rekomendasi:** Jika tidak perlu menerima `0x190`, kembalikan filter ke `0x7FF` dengan target `0x721` saja.
+
+### 17.8. Wideband Little Endian vs EPIC Big Endian
+
+**Lokasi:** `mega_epic_canbus.ino:sendWidebandFrame()`
+
+```cpp
+// rusEFI Wideband: Little Endian
+frame.data[2] = lambda_val & 0xFF;
+frame.data[3] = (lambda_val >> 8) & 0xFF;
+
+// EPIC variable_set: Big Endian
+writeInt32BigEndian(varHash, &txMsg.data[0]);
+```
+
+**Issue:** Kedua protocol di bus yang sama tapi byte order berbeda. Tidak conflict (CAN ID berbeda) tapi bisa membingungkan debugging.
+
+### 17.9. VSS Overflow Reset Paksa
+
+**Lokasi:** `mega_epic_canbus.ino`
 
 ```cpp
 else if (timeDelta >= 1000) {
@@ -1665,74 +2034,83 @@ else if (timeDelta >= 1000) {
 }
 ```
 
-**Issue:** Reset paksa semua VSS nilai ke 0 saat millis() overflow. Ini menyebabkan lompatan nilai dari kecepatan tinggi ke 0 selama satu siklus. Bisa memicu false positive pada traction control.
+**Issue:** Reset paksa semua VSS nilai ke 0 saat millis() overflow. Lompatan nilai dari kecepatan tinggi ke 0 bisa memicu false positive pada traction control.
 
-### 13.7. GPS PMTK Response Tidak Diproses
+### 17.10. Databox Buffer Overflow Risk
 
-**Lokasi:** `mega_epic_canbus.ino:414-437`
+**Lokasi:** `DataboxManager.cpp:pumpData()`
 
-Fungsi `checkPMTKResponse()` menunggu response dari GPS module, tapi **tidak pernah dipanggil** di firmware. Tidak ada konfigurasi GPS yang dikirim — module menggunakan default pabrik.
-
-### 13.8. Serial Monitor Debug
-
-Pada baris 511:
 ```cpp
-// Debug status removed to eliminate Serial output
+if (lineLength_ < (DATABOX_LINE_BUFFER_SIZE - 1)) {
+    lineBuffer_[lineLength_++] = ch;
+} else {
+    lineLength_ = 0;
+}
 ```
 
-Ini baik untuk produksi (Serial output memakan waktu), tapi menyulitkan debugging.
+**Issue:** Jika frame Databox > 96 byte, buffer di-reset tanpa processing. Frame fix 32 char + CRLF, aman dalam kondisi normal, tapi noise serial bisa menyebabkan overflow.
+
+**Rekomendasi:** Tambah buffer jadi 128 byte untuk safety margin.
 
 ---
 
-## 14. ROADMAP & STATUS
+## 18. ROADMAP & STATUS
 
-### Status Saat Ini: Phase 1 ✅
+### Status Saat Ini: Phase 1 + Merge GearIndicatorCan ✅
 
 | Modul | Status | Detail |
 |-------|--------|--------|
-| CAN Infrastructure | ✅ Selesai | MCP2515 init, 500 kbps, filter hardware |
+| CAN Infrastructure | ✅ Selesai | MCP2515 init, 500 kbps, filter hardware, retry + clock fallback |
 | Analog Input | ✅ Selesai | 16 channel, smart TX |
-| Digital Input | ✅ Selesai | 16-bit bitfield, smart TX |
+| Digital Input | ✅ Selesai | 11-bit bitfield (D27-D37), smart TX |
 | VSS Wheel Speed | ✅ Selesai | 4 channel interrupt-driven, smart TX |
 | GPS Module | ✅ Selesai | NMEA parsing, smart TX, packing |
-| Smart Transmission | ✅ Selesai | 29 channel state machine |
+| **Gear Detection** | ✅ **Selesai** | **5 switch input (D22-D26), validasi popcount, smart TX** |
+| **AFR Databox** | ✅ **Selesai** | **Serial3 (D14/D15) 57600 baud, state machine reconnect, hex parsing** |
+| **Wideband CAN 0x190/0x191** | ✅ **Selesai** | **rusEFI Native Wideband protocol, Little Endian, 10ms interval** |
+| Smart Transmission | ✅ Selesai | 30 channel state machine (+1 gear) |
 | Big-endian Utils | ✅ Selesai | int32/float32 read/write |
 | Slow GPIO Output | ✅ Selesai | Request/response, digitalWrite |
+| **CAN Error Handling** | ✅ **Selesai** | **Clock fallback (16MHz→8MHz), auto re-init, max retry 3x** |
 | PWM Output | ⚠️ Partial | Hanya on/off, belum duty cycle |
 
 ### Belum Dimulai ❌
 
 | Modul | Prioritas | Catatan |
 |-------|-----------|---------|
-| EPIC Protocol Parser Lengkap | Tinggi | RX handler masih minimal |
+| Register VAR_HASH_GEAR ke epicEFI | ✅ Selesai | Hash 283558758 sudah didaftarkan |
 | True PWM Duty Cycle | Tinggi | Gunakan nilai float dari ECU |
 | Interrupt-driven CAN RX | Sedang | Kurangi CPU load, cegah frame loss |
 | Error Handling TX/RX | Sedang | TX failure, bus-off recovery |
 | Watchdog Timer | Sedang | Deteksi ECU communication loss |
 | EEPROM Configuration | Rendah | Simpan ecuCanId, mapping |
 | Debouncing Digital Input | Rendah | Optional, bitfield change sudah akurat |
-| Modular Code Structure | Rendah | Pisah ke file terpisah |
-| Testing dengan ECU | Tinggi | Integration test |
+| Testing dengan ECU | Tinggi | Integration test gear + AFR + wideband |
 
 ### Roadmap
 
 ```
 Phase 1 [SELESAI]
   ├── CAN Infrastruktur
-  ├── Semua Input (analog, digital, VSS, GPS)
+  ├── Semua Input (analog, digital 16-bit, VSS, GPS)
   ├── Smart Transmission
   └── Output Dasar (request/response)
 
 Phase 2 [SELESAI SEBAGIAN]
   ├── Slow GPIO Output ✅
   ├── PWM Output (on/off) ⚠️
-  └── └── True PWM Duty Cycle ❌
+  ├── └── True PWM Duty Cycle ❌
+  ├── Gear Detection ✅ [BARU]
+  ├── AFR Databox Serial3 ✅ [BARU]
+  ├── rusEFI Wideband CAN 0x190/0x191 ✅ [BARU]
+  └── CAN Error Handling ✅ [BARU]
 
 Phase 3 [BELUM]
   ├── EPIC Protocol Parser Lengkap
   ├── Error Handling & Recovery
   ├── Watchdog Timer
-  └── Interrupt-driven CAN RX
+  ├── Interrupt-driven CAN RX
+  └── Integration Test Gear + AFR + ECU
 
 Phase 4 [BELUM]
   ├── Production Hardening
@@ -1741,9 +2119,18 @@ Phase 4 [BELUM]
   └── Full Integration Test
 ```
 
+### Perubahan Pin dari Versi Sebelumnya
+
+| Pin | Sebelum | Sesudah |
+|-----|---------|---------|
+| D14 | Spare GPIO | **Serial3 TX — Databox AFR** |
+| D15 | Spare GPIO | **Serial3 RX — Databox AFR** |
+| D22-D26 | Digital input (bit 0-4) | **Gear selector (N,1,2,3,4)** |
+| D27-D37 | Digital input (bit 5-15) | **Digital input (bit 0-10, 11-bit)** |
+
 ---
 
-## 15. REFERENSI
+## 19. REFERENSI
 
 ### File Firmware
 - `mega_epic_canbus.ino` — Main firmware (940 baris)

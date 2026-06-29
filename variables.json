@@ -82,6 +82,18 @@
   {
     "name": "MEGA_EPIC_1_D20_D34",
     "hash": 2136453598,
+    "source": "output",
+    "notes": "Digital input bitfield. D20-D21 (VSS, always 0), D22-D26 (gear, always 0), D27-D37 (11-bit buttons, bits 5-15)."
+  },
+  {
+    "name": "detectedGear",
+    "hash": 283558758,
+    "source": "output",
+    "notes": "Gear position: 0=N, 1=1, 2=2, 3=3, 4=4, 255=invalid. Registered with epicEFI."
+  },
+  {
+    "name": "MEGA_EPIC_1_OUT_SLOW",
+    "hash": 1430780106,
     "source": "output"
   }
 

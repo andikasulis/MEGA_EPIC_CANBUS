@@ -1,6 +1,6 @@
 ## MEGA_EPIC_CANBUS
 
-Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP2515-based shield. Provides 16 analog inputs, 11 PWM outputs (slow works now), 16 digital inputs, 7 digital outputs (slow works), and GPS input on TX2/RX2, all via the EPIC_CAN_BUS protocol at 500 kbps.
+Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP2515-based shield. Provides 16 analog inputs, 5 gear selector inputs, 11 digital inputs, 4 VSS wheel speed sensors, GPS input, AFR wideband input, and 8 slow GPIO + 10 PWM outputs, all via the EPIC_CAN_BUS protocol at 500 kbps.
 
 ![Example MCP2515 Hookup](images/conn1.png)
 
@@ -8,25 +8,34 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 
 ### Features
 - **16 analog inputs**: A0–A15 (0–5V)
-- **PWM outputs** (planned): D2–D8, D10–D13, D44–D46
-- **digital button inputs**: D22–D37
-- **digital low-speed outputs** (planned): D39–D43, D47–D49
-- **CAN 500 kbps** via MCP2515 (CS on `D9`, SPI via ICSP header or D50–D53)
+- **5 gear selector inputs**: D22–D26 (Neutral, 1, 2, 3, 4) with validation
+- **11 digital button inputs**: D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic)
+- **4 VSS wheel speed inputs**: D18–D21 (interrupt-driven, falling edge)
 - **GPS input over Serial2**: NMEA‑0183 (`GPRMC`/`GPGGA`) parsed and sent to ECU over CAN
+- **AFR wideband input over Serial3**: Databox protocol (BRT) at 57600 baud, D14/D15
+- **rusEFI Native Wideband CAN**: Sends AFR/lambda/temperature on CAN ID 0x190/0x191
+- **8 slow GPIO outputs**: D39–D43, D47–D49 (from ECU variable_request/response)
+- **10 PWM outputs**: D3, D5–D8, D11, D12, D44–D46 (from ECU variable_request/response)
+- **CAN error handling**: Auto-reinit with clock fallback (16MHz → 8MHz)
+- **Smart transmission**: On-change + heartbeat for all inputs (25ms fast, 500ms slow)
 - EPIC protocol operations: variable request/response, variable set, function call
 
 ### Status
-- Current:
-  - CAN TX/RX implemented
-  - Analog, digital, and VSS inputs sampled and transmitted using a smart on-change + heartbeat strategy
-  - GPS (time, date, position, speed, course, altitude, quality, satellites) read from Serial2, packed, and transmitted to the ECU using the same smart TX pattern
-- Missing: EPIC frame parsing, digital/PWM output modules, error handling
+- Current (Phase 1 + GearIndicatorCan merge):
+  - CAN TX/RX with error recovery (retry + clock fallback)
+  - All inputs sampled and transmitted using smart on-change + heartbeat strategy
+  - Gear detection with validation (only 1 gear active at a time)
+  - AFR wideband via Databox protocol (Serial3) + rusEFI Native Wideband CAN
+  - GPS (time, date, position, speed, course, altitude, quality, satellites)
+  - Digital output request/response from ECU (slow GPIO + PWM on/off)
+- Missing: True PWM duty cycle, interrupt-driven CAN RX, EEPROM configuration
 
 ### Hardware
 - Arduino Mega2560
 - MCP2515‑based CAN shield (e.g. generic MCP_CAN shield)
 - Default GPS module: GT‑U7 (u‑blox 7) style module  
   (e.g. [GT‑U7 (u‑blox7) module](https://www.amazon.com/dp/B08MZ2CBP7?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_13))
+- Optional: AFR wideband controller with Databox/UART output (57600 baud)
 
 #### Wiring Notes (Important)
 - **SPI / MCP2515:**
@@ -36,17 +45,22 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
   - The shield’s SPI pins **must** be routed to the ICSP header or to D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS) exactly as on a proper shield – avoid flying leads if possible.
 - **CAN bus:**
   - CAN_H/CAN_L twisted pair with proper 120Ω termination at both ends of the bus.
+- **AFR Databox:**
+  - Connect AFR controller TX to D15 (Serial3 RX) and RX to D14 (Serial3 TX).
+  - Use 57600 baud, 8N1.
 
 ### Pin Map Summary
 - **Analog inputs**: A0–A15
-- **PWM outputs (planned)**: D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D9 used by CS)
-- **Digital button inputs**: D22–D37 (16-bit packed, INPUT_PULLUP, inverted logic)
-- **Digital low-speed outputs**: D39–D43, D47–D49
+- **Gear inputs**: D22–D26 (Neutral, 1, 2, 3, 4)
+- **Digital button inputs**: D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic)
 - **VSS inputs** (wheel speed):
   - D18: Front Left (INT3)
   - D19: Front Right (INT2)
   - D20: Rear Left (INT1, I2C SDA disabled)
   - D21: Rear Right (INT0, I2C SCL disabled)
+- **AFR Databox UART**: D14 (TX3), D15 (RX3) @ 57600 baud
+- **PWM outputs**: D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D9 used by CS)
+- **Digital low-speed outputs**: D39–D43, D47–D49
 
 ### Protocol (EPIC_CAN_BUS)
 - Base IDs (11-bit standard):
