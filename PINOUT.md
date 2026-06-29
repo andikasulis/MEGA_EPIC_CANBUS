@@ -47,7 +47,7 @@
 | D34  |           | Digital input (button bitfield, bit 12)        |                      | INPUT_PULLUP, inverted (LOW=1)             |
 | D35  |           | Digital input (button bitfield, bit 13)        |                      | INPUT_PULLUP, inverted (LOW=1)             |
 | D36  |           | Digital input (button bitfield, bit 14)        |                      | INPUT_PULLUP, inverted (LOW=1)             |
-| D37  |           | Digital input (button bitfield, bit 15)        |                      | INPUT_PULLUP, inverted (LOW=1)             |
+| D37  |           | **Clutch switch input (bit 15)**              |                      | INPUT_PULLUP, switch ke GND saat ditekan     |
 | D38  |           | Spare GPIO                                    |                      | Candidate future low-speed output          |
 | D39  |           | Low-speed output `MEGA_EPIC_1_SLOW_D39`       |                      | Planned low-speed output                   |
 | D40  |           | Low-speed output `MEGA_EPIC_1_SLOW_D40`       |                      | Planned low-speed output                   |
@@ -84,7 +84,7 @@
 | A12  | Analog input, sent over CAN                | INPUT_PULLUP enabled         |
 | A13  | Analog input, sent over CAN                | INPUT_PULLUP enabled         |
 | A14  | Analog input, sent over CAN                | INPUT_PULLUP enabled         |
-| A15  | Analog input, sent over CAN                | INPUT_PULLUP enabled         |
+| A15  | Quickshift load cell (3.5-3.8V) | INPUT (no pullup!) | MEGA_EPIC_1_A15 (-1821826347) | Jangan pakai pullup |
 
 ### Other / Special
 
@@ -99,9 +99,10 @@
 - **Reserved:** D9 (CAN CS), D50–D53 (SPI)  
 - **VSS inputs:** D18–D21 (external interrupts, pullups enabled, falling edge)  
 - **Gear inputs:** D22–D26 (5-bit, INPUT_PULLUP, inverted logic, only 1 active at a time)  
-- **Digital inputs:** D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic)  
+- **Digital inputs:** D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic, D37 = clutch switch)  
 - **AFR Databox UART:** D14 (TX3), D15 (RX3) @ 57600 baud  
-- **Analog inputs:** A0–A15  
-- **PWM outputs:** D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D2 used for CAN INT)  
+- **GPS UART:** D16 (TX2), D17 (RX2) @ 115200 baud  
+- **Analog inputs:** A0–A14 (INPUT_PULLUP), **A15** (INPUT only — quickshift load cell 3.5-3.8V)  
+- **PWM outputs:** D3, D5, D6, D7, D8, D11, D12, D44, D45, D46  
 - **Low-speed outputs:** D39, D40, D41, D42, D43, D47, D48, D49  
-- **Spare GPIO/PWM:** D0, D1, D10, D38 (subject to peripheral use)  
+- **Spare GPIO/PWM:** D0, D1, D10, D38  

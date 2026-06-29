@@ -9,7 +9,7 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 ### Features
 - **16 analog inputs**: A0–A15 (0–5V)
 - **5 gear selector inputs**: D22–D26 (Neutral, 1, 2, 3, 4) with validation
-- **11 digital button inputs**: D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic)
+- **11 digital inputs**: D27–D36 (button bitfield) + D37 (clutch switch)
 - **4 VSS wheel speed inputs**: D18–D21 (interrupt-driven, falling edge)
 - **GPS input over Serial2**: NMEA‑0183 (`GPRMC`/`GPGGA`) parsed and sent to ECU over CAN
 - **AFR wideband input over Serial3**: Databox protocol (BRT) at 57600 baud, D14/D15
@@ -52,7 +52,7 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 ### Pin Map Summary
 - **Analog inputs**: A0–A15
 - **Gear inputs**: D22–D26 (Neutral, 1, 2, 3, 4)
-- **Digital button inputs**: D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic)
+- **Digital button inputs**: D27–D36 (10-bit packed) + D37 (clutch switch)
 - **VSS inputs** (wheel speed):
   - D18: Front Left (INT3)
   - D19: Front Right (INT2)

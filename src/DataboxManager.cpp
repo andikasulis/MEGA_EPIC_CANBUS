@@ -1,7 +1,7 @@
 #include "DataboxManager.h"
 
 #include <ctype.h>
-#include <cstring>
+#include <string.h>
 
 DataboxManager::DataboxManager()
     : lineLength_(0), lastDataTime_(0), connected_(false),

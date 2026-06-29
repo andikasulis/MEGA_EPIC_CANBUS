@@ -524,7 +524,6 @@ static inline uint32_t packGPSMYQSAT(uint8_t months, uint8_t years, uint8_t qual
 }
 
 static bool readGPSData() {
-    unsigned long nowMs = millis();
     bool dataReceived = false;
     while (GPS_SERIAL.available() > 0) {
         char c = GPS_SERIAL.read();

@@ -83,7 +83,7 @@
     "name": "MEGA_EPIC_1_D20_D34",
     "hash": 2136453598,
     "source": "output",
-    "notes": "Digital input bitfield. D20-D21 (VSS, always 0), D22-D26 (gear, always 0), D27-D37 (11-bit buttons, bits 5-15)."
+    "notes": "Digital input bitfield. D20-D21 (VSS, always 0), D22-D26 (gear, always 0), D27-D36 (10-bit buttons, bits 5-14), D37 (clutch switch, bit 15)."
   },
   {
     "name": "detectedGear",

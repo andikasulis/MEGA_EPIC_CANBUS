@@ -1390,7 +1390,8 @@ Semua hash adalah CRC32-based signed int32. Hash konsisten antara firmware Mega 
 **MEGA_EPIC_1_D20_D34** — menggunakan hash existing yang sudah ada di epicEFI. Bitfield:
 - Bit 0-1: D20-D21 (VSS, selalu 0)
 - Bit 2-4: D22-D26 (gear, selalu 0)
-- Bit 5-15: D27-D37 (11-bit digital button inputs)
+- Bit 5-14: D27-D36 (10-bit digital button inputs)
+- Bit 15: **D37 (clutch switch)** — switch ke GND saat ditekan
 
 ```cpp
 // Bit packing: D27-D37 masuk ke bit 5-15
@@ -2126,7 +2127,8 @@ Phase 4 [BELUM]
 | D14 | Spare GPIO | **Serial3 TX — Databox AFR** |
 | D15 | Spare GPIO | **Serial3 RX — Databox AFR** |
 | D22-D26 | Digital input (bit 0-4) | **Gear selector (N,1,2,3,4)** |
-| D27-D37 | Digital input (bit 5-15) | **Digital input (bit 0-10, 11-bit)** |
+| D27-D36 | Digital input (bit 5-14) | 10 button inputs | INPUT_PULLUP |
+| **D37** | **Clutch switch (bit 15)** | **Switch ke GND saat ditekan** | INPUT_PULLUP |
 
 ---
 
