@@ -697,7 +697,8 @@ void setup()
     databox.begin();
 
     // ── Analog Inputs ──
-    for (uint8_t i = 0; i < 16; ++i) pinMode(A0 + i, INPUT_PULLUP);
+    for (uint8_t i = 0; i < 15; ++i) pinMode(A0 + i, INPUT_PULLUP);
+    pinMode(A15, INPUT);  // A15: quickshift load cell (3.5-3.8V), jangan pakai pullup
 
     // ── Gear Inputs (D22-D26) ──
     for (uint8_t i = 0; i < 5; ++i) pinMode(GEAR_PINS[i], INPUT_PULLUP);
