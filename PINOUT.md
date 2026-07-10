@@ -3,8 +3,24 @@
 **Notes**
 - **PWM-capable pins:** D2–D13, D44–D46  
 - **External interrupts:** INT0(D21), INT1(D20), INT2(D19), INT3(D18)  
-- **SPI (hardware):** D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS)  
+- **SPI (hardware via ICSP header):** D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS)  
 - **I2C (TWI):** D20 (SDA), D21 (SCL) — disabled in firmware, used as VSS interrupts  
+
+---
+
+## MCP2515 CAN Shield Wiring (ICSP Header)
+
+| MCP2515 Pin | → | Mega2560 Pin | Fungsi |
+|-------------|---|--------------|--------|
+| CS | → | **D9** | Chip Select |
+| INT | → | **D2** | CAN Interrupt (belum dipakai, masih polling) |
+| SO (MISO) | → | **ICSP MISO** | SPI data out (MCP2515 → Mega) |
+| SI (MOSI) | → | **ICSP MOSI** | SPI data in (Mega → MCP2515) |
+| SCK | → | **ICSP SCK** | SPI clock |
+| VCC | → | **ICSP VCC** | 5V power |
+| GND | → | **ICSP GND** | Ground |
+
+**Note:** Shield MCP2515 biasanya punya header 2×3 yang langsung colok ke ICSP header di Mega. CAN_H/CAN_L keluar dari connector CAN di shield, bukan dari ICSP.
 
 ### Digital Pins
 
@@ -96,7 +112,7 @@
 
 ### Summary
 
-- **Reserved:** D9 (CAN CS), D50–D53 (SPI)  
+- **MCP2515 SPI (via ICSP):** D9 (CS), D2 (INT), ICSP header (MISO/MOSI/SCK/VCC/GND)
 - **VSS inputs:** D18–D21 (external interrupts, pullups enabled, falling edge)  
 - **Gear inputs:** D22–D26 (5-bit, INPUT_PULLUP, inverted logic, only 1 active at a time)  
 - **Digital inputs:** D27–D37 (11-bit packed, INPUT_PULLUP, inverted logic, D37 = clutch switch)  

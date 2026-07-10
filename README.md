@@ -12,6 +12,7 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 - **11 digital inputs**: D27–D36 (button bitfield) + D37 (clutch switch)
 - **4 VSS wheel speed inputs**: D18–D21 (interrupt-driven, falling edge)
 - **GPS input over Serial2**: NMEA‑0183 (`GPRMC`/`GPGGA`) parsed and sent to ECU over CAN
+- **GPS debug logging**: Serial console output (1s interval) showing fix, coords, speed, etc.
 - **AFR wideband input over Serial3**: Databox protocol (BRT) at 57600 baud, D14/D15
 - **rusEFI Native Wideband CAN**: Sends AFR/lambda/temperature on CAN ID 0x190/0x191
 - **8 slow GPIO outputs**: D39–D43, D47–D49 (from ECU variable_request/response)
@@ -38,13 +39,13 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 - Optional: AFR wideband controller with Databox/UART output (57600 baud)
 
 #### Wiring Notes (Important)
-- **SPI / MCP2515:**
+- **SPI / MCP2515 (via ICSP Header):**
   - Use the **6‑pin ICSP header in the center of the Mega2560** for SPI (MISO/MOSI/SCK).  
     Many MCP2515 shields have a matching 2×3 header that should plug directly into the ICSP header.
-  - `CS` (chip select) for MCP2515 is **D9** (reserved, do not use for other I/O).
-  - The shield’s SPI pins **must** be routed to the ICSP header or to D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS) exactly as on a proper shield – avoid flying leads if possible.
-- **CAN bus:**
+  - MCP2515 wiring: `CS` → **D9**, `INT` → **D2**, `SO` → ICSP MISO, `SI` → ICSP MOSI, `SCK` → ICSP SCK
   - CAN_H/CAN_L twisted pair with proper 120Ω termination at both ends of the bus.
+- **GPS UART (Serial2):**
+  - D16 (TX2), D17 (RX2) @ 115200 baud
 - **AFR Databox:**
   - Connect AFR controller TX to D15 (Serial3 RX) and RX to D14 (Serial3 TX).
   - Use 57600 baud, 8N1.
@@ -58,7 +59,9 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
   - D19: Front Right (INT2)
   - D20: Rear Left (INT1, I2C SDA disabled)
   - D21: Rear Right (INT0, I2C SCL disabled)
+- **GPS UART**: D16 (TX2), D17 (RX2) @ 115200 baud
 - **AFR Databox UART**: D14 (TX3), D15 (RX3) @ 57600 baud
+- **MCP2515 CAN SPI**: D9 (CS), D2 (INT), ICSP header (MISO/MOSI/SCK)
 - **PWM outputs**: D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D9 used by CS)
 - **Digital low-speed outputs**: D39–D43, D47–D49
 
@@ -82,6 +85,32 @@ See `.project/epic_can_bus_spec.txt` for full details.
 4. Board: Arduino Mega or Mega 2560 (ATmega2560)
 5. Port: your USB serial port
 6. Upload and open Serial Monitor at 115200 baud
+
+### Serial Monitor Output
+Open Serial Monitor at **115200 baud** to see debug output:
+
+```
+MEGA_EPIC_CANBUS booting...
+[CAN] Init with MCP_16MHZ...
+[CAN] Ready (16MHz)
+[GPS] Waiting for data on Serial2...
+[GPS] First valid data received!
+[GPS] fix=Y q=1 sats=8 time=23:09:52 date=03/07/2026 lat=-6.123456 lon=106.123456 alt=12.3 spd=45.6 crs=180.0 hdop=1.20
+[CAN] Probe CANSTAT=0x00 CANCTRL=0x80 EFLG=0x00
+MEGA_EPIC_CANBUS ready!
+```
+
+GPS log format (1s interval):
+- `fix` = Y/N (GPS fix status)
+- `q` = quality (0=none, 1=GPS, 2=DGPS)
+- `sats` = number of satellites
+- `time` = UTC (HH:MM:SS)
+- `date` = (DD/MM/YYYY)
+- `lat/lon` = decimal degrees (6 decimal)
+- `alt` = altitude meters
+- `spd` = speed km/h
+- `crs` = course/heading degrees
+- `hdop` = horizontal dilution of precision
 
 ### Configuration
 - `ecuCanId` (0–15): per-device address used to derive CAN IDs (e.g., `0x700 + ecuCanId`). Define this in code and in docs. If not chosen, default to `1` in early testing.

@@ -185,7 +185,7 @@ bool nmeaVerifyChecksum(const char* sentence) {
 // Parse GPRMC sentence (Recommended Minimum Course)
 // Format: $GPRMC,time,status,lat,N/S,lon,E/W,speed,course,date,mag_var,E/W,mode*checksum
 static bool parseGPRMC(const char* sentence, struct GPSData* gpsData) {
-    if (!sentence || strncmp(sentence, "$GPRMC", 6) != 0) return false;
+    if (!sentence || (strncmp(sentence+3, "RMC", 3) != 0)) return false;
     if (!nmeaVerifyChecksum(sentence)) return false;
     
     const char* timeStr = nmeaGetField(sentence, 1);  // Field 1: time
@@ -306,7 +306,7 @@ static bool parseGPRMC(const char* sentence, struct GPSData* gpsData) {
 // Standard NMEA-0183 format:
 // $GPGGA,time,lat,N/S,lon,E/W,quality,num_sats,hdop,altitude,M,sep,M,diff_age,diff_station*checksum
 static bool parseGPGGA(const char* sentence, struct GPSData* gpsData) {
-    if (!sentence || strncmp(sentence, "$GPGGA", 6) != 0) return false;
+    if (!sentence || (strncmp(sentence+3, "GGA", 3) != 0)) return false;
     if (!nmeaVerifyChecksum(sentence)) return false;
     
     const char* latStr = nmeaGetField(sentence, 2);  // Field 2: latitude (DDMM.MMMM)
@@ -437,17 +437,19 @@ bool nmeaParserProcessChar(char c, struct GPSData* gpsData) {
     else if (c == '\r' || c == '\n') {
         if (nmeaBufferIndex > 0) {
             nmeaBuffer[nmeaBufferIndex] = '\0';  // Null terminate
-            
-            // Parse the sentence
+
+            // Parse the sentence - match $xxRMC and $xxGGA for all talker IDs
+            // (GP=GPS, GL=GLONASS, GA=Galileo, GN=Multi-GNSS, BD=BeiDou)
             bool parsed = false;
-            if (strncmp(nmeaBuffer, "$GPRMC", 6) == 0) {
+            const char* tag = nmeaBuffer + 1;  // skip $
+            if (tag[0] != '\0' && tag[1] != '\0' &&
+                (tag[2] == 'R' && tag[3] == 'M' && tag[4] == 'C')) {
                 parsed = parseGPRMC(nmeaBuffer, gpsData);
-            } else if (strncmp(nmeaBuffer, "$GPGGA", 6) == 0) {
+            } else if (tag[0] != '\0' && tag[1] != '\0' &&
+                       (tag[2] == 'G' && tag[3] == 'G' && tag[4] == 'A')) {
                 parsed = parseGPGGA(nmeaBuffer, gpsData);
-            } else {
-                // Other sentence types are ignored
             }
-            
+
             // Reset buffer
             nmeaBufferIndex = 0;
             return parsed;

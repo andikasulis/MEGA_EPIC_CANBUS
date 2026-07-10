@@ -155,7 +155,7 @@ static float currentVssValues[4] = {0};
 
 // ─── GPS State ───────────────────────────────────────────────────
 #define GPS_SERIAL Serial2
-#define GPS_BAUD_RATE 115200
+#define GPS_BAUD_RATE 9600
 #define GPS_UPDATE_RATE_HZ 20
 #define GPS_BAUD_RATE_HIGH_SPEED 0
 
@@ -263,8 +263,7 @@ static void configureCANFilters()
 // CAN Initialization with Retry + Clock Fallback
 // ================================================================
 
-static void logMcpProbe() {
-    // Debug: read MCP2515 registers via direct SPI
+static bool logMcpProbe(bool postInit) {
     digitalWrite(SPI_CS_PIN, LOW);
     SPI.transfer(0x03); SPI.transfer(0x0E);
     uint8_t canstat = SPI.transfer(0x00);
@@ -280,9 +279,20 @@ static void logMcpProbe() {
     uint8_t eflg = SPI.transfer(0x00);
     digitalWrite(SPI_CS_PIN, HIGH);
 
-    Serial.print(F("[CAN] Probe CANSTAT=0x")); Serial.print(canstat, HEX);
+    bool detected;
+    if (postInit) {
+        detected = (canstat != 0xFF);
+    } else {
+        detected = (canstat == 0x80) || (canstat == 0x00);
+    }
+
+    Serial.print(F("[CAN] SPI probe: CANSTAT=0x")); Serial.print(canstat, HEX);
     Serial.print(F(" CANCTRL=0x")); Serial.print(canctrl, HEX);
-    Serial.print(F(" EFLG=0x")); Serial.println(eflg, HEX);
+    Serial.print(F(" EFLG=0x")); Serial.print(eflg, HEX);
+    Serial.print(F(" -> HW-184 "));
+    Serial.println(detected ? F("DETECTED") : F("NOT DETECTED (no SPI response)"));
+
+    return detected;
 }
 
 static bool setupCan(CAN_CLOCK clock) {
@@ -297,13 +307,13 @@ static bool setupCan(CAN_CLOCK clock) {
 static bool initializeCanController() {
     Serial.println(F("[CAN] Init with MCP_16MHZ..."));
     if (setupCan(MCP_16MHZ)) {
-        logMcpProbe();
+        logMcpProbe(true);
         Serial.println(F("[CAN] Ready (16MHz)"));
         return true;
     }
     Serial.println(F("[CAN] 16MHz failed, trying 8MHz..."));
     if (setupCan(MCP_8MHZ)) {
-        logMcpProbe();
+        logMcpProbe(true);
         Serial.println(F("[CAN] Ready (8MHz)"));
         return true;
     }
@@ -510,6 +520,74 @@ static void sendWidebandFrame(float afr, float duty, float ur, bool connected) {
 }
 
 // ================================================================
+// GPS Debug Logging
+// ================================================================
+
+#define GPS_DEBUG_INTERVAL_MS 1000
+static bool gpsLastDataValid = false;
+
+static void logGPSStatus() {
+    static unsigned long lastLogMs = 0;
+    unsigned long nowMs = millis();
+
+    if (!gpsEnabled) {
+        if (nowMs - lastLogMs >= 5000) {
+            lastLogMs = nowMs;
+            Serial.print(F("[GPS] Still waiting... (check D16-RX2 wiring to GPS TX, baud=9600) ["));
+            Serial.print(millis() / 1000);
+            Serial.println(F("s]"));
+        }
+        return;
+    }
+
+    if (!gpsData.dataValid) return;
+
+    if (!gpsLastDataValid) {
+        gpsLastDataValid = true;
+        Serial.println(F("[GPS] MODULE DETECTED - first valid NMEA received!"));
+    }
+
+    if (nowMs - lastLogMs >= GPS_DEBUG_INTERVAL_MS) {
+        lastLogMs = nowMs;
+
+        Serial.print(F("[GPS] fix="));
+        Serial.print(gpsData.hasFix ? 'Y' : 'N');
+        Serial.print(F(" q="));
+        Serial.print(gpsData.quality);
+        Serial.print(F(" sats="));
+        Serial.print(gpsData.satellites);
+        Serial.print(F(" time="));
+        if (gpsData.hours < 10) Serial.print('0');
+        Serial.print(gpsData.hours); Serial.print(':');
+        if (gpsData.minutes < 10) Serial.print('0');
+        Serial.print(gpsData.minutes); Serial.print(':');
+        if (gpsData.seconds < 10) Serial.print('0');
+        Serial.print(gpsData.seconds);
+        Serial.print(F(" date="));
+        if (gpsData.days < 10) Serial.print('0');
+        Serial.print(gpsData.days); Serial.print('/');
+        if (gpsData.months < 10) Serial.print('0');
+        Serial.print(gpsData.months); Serial.print("/20");
+        if (gpsData.years < 10) Serial.print('0');
+        Serial.print(gpsData.years);
+
+        Serial.print(F(" lat="));
+        Serial.print(gpsData.latitude, 6);
+        Serial.print(F(" lon="));
+        Serial.print(gpsData.longitude, 6);
+        Serial.print(F(" alt="));
+        Serial.print(gpsData.altitude, 1);
+        Serial.print(F(" spd="));
+        Serial.print(gpsData.speed, 1);
+        Serial.print(F(" crs="));
+        Serial.print(gpsData.course, 1);
+        Serial.print(F(" hdop="));
+        Serial.print(gpsData.accuracy, 2);
+        Serial.println();
+    }
+}
+
+// ================================================================
 // GPS Functions
 // ================================================================
 
@@ -686,11 +764,18 @@ void setup()
     }
 
     // ── GPS ──
+    Serial.println(F("[GPS] Init Serial2 @9600 baud on D16(RX2)/D17(TX2)..."));
     GPS_SERIAL.begin(GPS_BAUD_RATE);
     delay(200);
+    uint16_t gpsAvailable = GPS_SERIAL.available();
     gpsInitialized = true;
     gpsEnabled = false;
     nmeaParserInit();
+    if (gpsAvailable > 0) {
+        Serial.print(F("[GPS] DETECTED - ")); Serial.print(gpsAvailable); Serial.println(F(" bytes already in buffer"));
+    } else {
+        Serial.println(F("[GPS] No data yet - waiting for NMEA sentences..."));
+    }
 
     // ── Databox AFR ──
     databox.begin();
@@ -758,6 +843,9 @@ void setup()
     gearTxState.state = TX_STATE_CHANGED;
 
     Serial.println(F("MEGA_EPIC_CANBUS ready!"));
+    Serial.println(F("─── HW-184 Connection Summary ───"));
+    Serial.print(F("[CAN] HW-184: ")); Serial.println(canReady ? F("CONNECTED") : F("NOT CONNECTED"));
+    Serial.print(F("[GPS] Module: ")); Serial.println(gpsEnabled ? F("CONNECTED") : F("WAITING (not yet detected)"));
 }
 
 // ================================================================
@@ -816,6 +904,7 @@ void loop()
 
     // ── GPS ──
     readGPSData();
+    logGPSStatus();
 
     // ── Databox AFR ──
     databox.update();
