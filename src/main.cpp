@@ -72,12 +72,21 @@ static inline void writeFloat32BigEndian(float value, uint8_t* out) {
     out[3] = (uint8_t)conv.u;
 }
 
-static inline void sendVariableSetFrame(int32_t varHash, float value) {
+static uint32_t canTxOkCount = 0;
+static uint32_t canTxErrCount = 0;
+
+static inline uint8_t sendVariableSetFrame(int32_t varHash, float value) {
     txMsg.can_id  = CAN_ID_VARIABLE_SET;
     txMsg.can_dlc = 8;
     writeInt32BigEndian(varHash, &txMsg.data[0]);
     writeFloat32BigEndian(value, &txMsg.data[4]);
-    CAN.sendMessage(&txMsg);
+    uint8_t err = CAN.sendMessage(&txMsg);
+    if (err == MCP2515::ERROR_OK) {
+        canTxOkCount++;
+    } else {
+        canTxErrCount++;
+    }
+    return err;
 }
 
 static void configureCANFilters() {
@@ -116,10 +125,15 @@ void setup() {
     Serial.begin(115200);
     while (!Serial); // Remove for stand-alone (battery) operation
 
+    Serial.println(F("NANO_EPIC_CANBUS starting"));
+    Serial.print(F("CAN bitrate=500KBPS crystal="));
+    Serial.println(BOARD_CAN_CLOCK == MCP_16MHZ ? F("16MHZ") : F("8MHZ"));
+
     CAN.reset();
     CAN.setBitrate(CAN_500KBPS, BOARD_CAN_CLOCK);
     configureCANFilters();
     CAN.setNormalMode();
+    Serial.println(F("CAN init done"));
 
     pinMode(QUICKSHIFTER_ADC_PIN, INPUT);
     pinMode(CLUTCH_DIGITAL_PIN, INPUT_PULLUP);
@@ -158,13 +172,16 @@ void loop() {
         markChanged(&clutchState, currentClutch != (uint8_t)clutchState.lastValue);
     }
 
+    static uint8_t lastAdcErr = 0;
+    static uint8_t lastClutchErr = 0;
+
     if (shouldTransmit(&adcState, nowMs)) {
-        sendVariableSetFrame(VAR_HASH_QUICKSHIFTER, currentAdc);
+        lastAdcErr = sendVariableSetFrame(VAR_HASH_QUICKSHIFTER, currentAdc);
         updateAfterTx(&adcState, currentAdc, nowMs);
     }
 
     if (shouldTransmit(&clutchState, nowMs)) {
-        sendVariableSetFrame(VAR_HASH_CLUTCH, (float)currentClutch);
+        lastClutchErr = sendVariableSetFrame(VAR_HASH_CLUTCH, (float)currentClutch);
         updateAfterTx(&clutchState, (float)currentClutch, nowMs);
     }
 
@@ -178,6 +195,14 @@ void loop() {
         Serial.print(F(" ADC_CHG="));
         Serial.print(adcState.changed ? '1' : '0');
         Serial.print(F(" CLUTCH_CHG="));
-        Serial.println(clutchState.changed ? '1' : '0');
+        Serial.print(clutchState.changed ? '1' : '0');
+        Serial.print(F(" TX_OK="));
+        Serial.print(canTxOkCount);
+        Serial.print(F(" TX_ERR="));
+        Serial.print(canTxErrCount);
+        Serial.print(F(" ERR_ADC="));
+        Serial.print(lastAdcErr);
+        Serial.print(F(" ERR_CLUTCH="));
+        Serial.println(lastClutchErr);
     }
 }
