@@ -139,11 +139,13 @@ static inline uint8_t readCanStatus() {
 }
 
 static inline uint8_t readCanReg(uint8_t reg) {
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
     digitalWrite(SPI_CS_PIN, LOW);
     SPI.transfer(0x03); // READ instruction
     SPI.transfer(reg);
     uint8_t value = SPI.transfer(0x00);
     digitalWrite(SPI_CS_PIN, HIGH);
+    SPI.endTransaction();
     return value;
 }
 
@@ -244,6 +246,14 @@ void loop() {
         uint8_t err = CAN.sendMessage(&testMsg);
         Serial.print(F("LB TX err="));
         Serial.println(err);
+        delayMicroseconds(500);
+        struct can_frame rx;
+        uint8_t rxErr = CAN.readMessage(&rx);
+        Serial.print(F("LB RX err="));
+        Serial.println(rxErr);
+        if (rxErr == MCP2515::ERROR_OK) {
+            logCanFrame(rx);
+        }
     }
 #endif
 
