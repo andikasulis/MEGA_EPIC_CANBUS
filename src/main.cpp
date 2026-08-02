@@ -11,6 +11,10 @@
 // MCP2515 crystal: MCP_8MHZ for generic modules, MCP_16MHZ for Seeed shields.
 #define BOARD_CAN_CLOCK MCP_8MHZ
 
+// Set to 1 to enable loopback self-test instead of normal CAN TX/RX.
+// In loopback mode the Nano sends frames to itself; useful to verify MCP2515 + SPI.
+#define CAN_LOOPBACK_TEST 1
+
 // MCP2515 chip select (change if your shield uses a different pin).
 #define SPI_CS_PIN 10
 
@@ -130,6 +134,18 @@ static void configureCANFilters() {
     CAN.setFilter(MCP2515::RXF5, false, 0x000);
 }
 
+static inline uint8_t readCanStatus() {
+    return CAN.getStatus();
+}
+
+static inline uint8_t readCanMode() {
+    return CAN.readRegister(MCP2515::MCP_CANCTRL);
+}
+
+static inline uint8_t readCanStat() {
+    return CAN.readRegister(MCP2515::MCP_CANSTAT);
+}
+
 static bool shouldTransmit(TxChannelState* s, unsigned long nowMs) {
     if (s->changed) {
         return (nowMs - s->lastTxMs) >= TX_INTERVAL_FAST_MS;
@@ -162,8 +178,20 @@ void setup() {
     CAN.reset();
     CAN.setBitrate(CAN_500KBPS, BOARD_CAN_CLOCK);
     configureCANFilters();
+
+#if CAN_LOOPBACK_TEST
+    CAN.setLoopbackMode();
+    Serial.println(F("CAN LOOPBACK TEST enabled"));
+#else
     CAN.setNormalMode();
+#endif
     Serial.println(F("CAN init done"));
+    Serial.print(F("CANCTRL=0x"));
+    Serial.println(readCanMode(), HEX);
+    Serial.print(F("CANSTAT=0x"));
+    Serial.println(readCanStat(), HEX);
+    Serial.print(F("STATUS=0x"));
+    Serial.println(readCanStatus(), HEX);
 
     pinMode(QUICKSHIFTER_ADC_PIN, INPUT);
     pinMode(CLUTCH_DIGITAL_PIN, INPUT_PULLUP);
@@ -195,6 +223,20 @@ static void logCanFrame(const struct can_frame& frame) {
 
 void loop() {
     unsigned long nowMs = millis();
+
+#if CAN_LOOPBACK_TEST
+    static unsigned long lastLoopbackTxMs = 0;
+    if (nowMs - lastLoopbackTxMs >= 1000) {
+        lastLoopbackTxMs = nowMs;
+        struct can_frame testMsg;
+        testMsg.can_id = 0x123;
+        testMsg.can_dlc = 8;
+        for (uint8_t i = 0; i < 8; ++i) testMsg.data[i] = i;
+        uint8_t err = CAN.sendMessage(&testMsg);
+        Serial.print(F("LB TX err="));
+        Serial.println(err);
+    }
+#endif
 
     static unsigned long lastRxLogMs = 0;
     static uint8_t rxLogCount = 0;
