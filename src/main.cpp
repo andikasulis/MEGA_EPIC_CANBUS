@@ -28,16 +28,26 @@ MCP2515 CAN(SPI_CS_PIN);
 #define QUICKSHIFTER_ADC_PIN A0  // ADC0
 #define CLUTCH_DIGITAL_PIN   4   // INPUT_PULLUP: LOW = clutch active
 
+// The firmware exposes the clutch as bit 0 of the MEGA_EPIC_1_D22_D37 packed
+// digital word. On the original Mega2560 board bit 0 maps to physical D22.
+// On this Nano build we reuse the same EPIC variable so the ECU side stays
+// unchanged; only the local Arduino pin is different.
+#define CLUTCH_BIT_INDEX 0
+
 // Variable hashes from variables.json / ECU.
 // See docs/CAN_VARIABLE_MAP.md for valid EPIC CAN variables.
 #define VAR_HASH_QUICKSHIFTER 595545759L   // MEGA_EPIC_1_A0
-#define VAR_HASH_CLUTCH       2138825443L  // MEGA_EPIC_1_D22_D37 (bit 0 = D22)
+#define VAR_HASH_CLUTCH       2138825443L  // MEGA_EPIC_1_D22_D37
 
 // Smart TX parameters
 #define TX_READ_INTERVAL_MS 10
 #define TX_INTERVAL_FAST_MS 25
 #define TX_INTERVAL_SLOW_MS 500
 #define TX_ANALOG_THRESHOLD 2.0f
+
+// ADC scaling: the ECU outputChannels stores MEGA_EPIC_1_A0 as U16 raw counts.
+// The EPIC variable_set frame uses float32, so send raw 0..1023 counts.
+#define ADC_SEND_RAW_COUNTS 1
 
 // Interactive serial logging
 #define SERIAL_LOG_INTERVAL_MS 500
@@ -87,6 +97,16 @@ static inline uint8_t sendVariableSetFrame(int32_t varHash, float value) {
         canTxErrCount++;
     }
     return err;
+}
+
+// Pack digital inputs into the MEGA_EPIC_1_D22_D37 bitfield word.
+// Bit 0 = clutch (LOW active, INPUT_PULLUP).
+static inline uint16_t packDigitalInputs(uint8_t clutchActive) {
+    uint16_t bits = 0;
+    if (clutchActive) {
+        bits |= (1u << CLUTCH_BIT_INDEX);
+    }
+    return bits;
 }
 
 static void configureCANFilters() {
@@ -169,7 +189,8 @@ void loop() {
         if (adcDiff < 0.0f) adcDiff = -adcDiff;
         markChanged(&adcState, adcDiff >= TX_ANALOG_THRESHOLD);
 
-        markChanged(&clutchState, currentClutch != (uint8_t)clutchState.lastValue);
+        uint16_t packedDigital = packDigitalInputs(currentClutch);
+        markChanged(&clutchState, packedDigital != (uint16_t)clutchState.lastValue);
     }
 
     static uint8_t lastAdcErr = 0;
@@ -181,8 +202,9 @@ void loop() {
     }
 
     if (shouldTransmit(&clutchState, nowMs)) {
-        lastClutchErr = sendVariableSetFrame(VAR_HASH_CLUTCH, (float)currentClutch);
-        updateAfterTx(&clutchState, (float)currentClutch, nowMs);
+        uint16_t packedDigital = packDigitalInputs(currentClutch);
+        lastClutchErr = sendVariableSetFrame(VAR_HASH_CLUTCH, (float)packedDigital);
+        updateAfterTx(&clutchState, (float)packedDigital, nowMs);
     }
 
     static unsigned long lastLogMs = 0;
@@ -192,6 +214,8 @@ void loop() {
         Serial.print(currentAdc, 0);
         Serial.print(F(" CLUTCH="));
         Serial.print(currentClutch);
+        Serial.print(F(" DIGITAL="));
+        Serial.print(packDigitalInputs(currentClutch), BIN);
         Serial.print(F(" ADC_CHG="));
         Serial.print(adcState.changed ? '1' : '0');
         Serial.print(F(" CLUTCH_CHG="));

@@ -70,5 +70,7 @@ The ECU sends this value as a float; cast / round to `uint32_t` and unpack.
 
 | Signal | Variable | Hash | Pin | Notes |
 |--------|----------|------|-----|-------|
-| QuickShifter ADC | `MEGA_EPIC_1_A0` | `595545759` | A0 | 0–1023 ADC counts |
+| QuickShifter / load cell ADC | `MEGA_EPIC_1_A0` | `595545759` | A0 | raw 0–1023 ADC counts |
 | Clutch switch | `MEGA_EPIC_1_D22_D37` bit 0 | `2138825443` | D4 | `1` when grounded (LOW) |
+
+See `docs/TUNERSTUDIO_SETUP.md` for wiring the variables into rusEFI.

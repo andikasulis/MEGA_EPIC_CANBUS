@@ -9,7 +9,7 @@ Project: `NANO_EPIC_CANBUS` — minimal EPIC CAN sender for quickshifter + clutc
 | D11 | MOSI | SPI |
 | D12 | MISO | SPI |
 | D13 | SCK  | SPI |
-| A0  | QuickShifter ADC | 0-5V analog input → `MEGA_EPIC_1_A0` |
+| A0  | QuickShifter / load cell ADC | 0-5V analog input → `MEGA_EPIC_1_A0` (raw 0..1023 counts) |
 | D4  | Clutch switch | `INPUT_PULLUP`, LOW = active, mapped to bit 0 of `MEGA_EPIC_1_D22_D37` |
 
 ## Available for future expansion
