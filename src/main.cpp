@@ -138,12 +138,21 @@ static inline uint8_t readCanStatus() {
     return CAN.getStatus();
 }
 
+static inline uint8_t readCanReg(uint8_t reg) {
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x03); // READ instruction
+    SPI.transfer(reg);
+    uint8_t value = SPI.transfer(0x00);
+    digitalWrite(SPI_CS_PIN, HIGH);
+    return value;
+}
+
 static inline uint8_t readCanMode() {
-    return CAN.readRegister(MCP2515::MCP_CANCTRL);
+    return readCanReg(0x0F); // CANCTRL
 }
 
 static inline uint8_t readCanStat() {
-    return CAN.readRegister(MCP2515::MCP_CANSTAT);
+    return readCanReg(0x0E); // CANSTAT
 }
 
 static bool shouldTransmit(TxChannelState* s, unsigned long nowMs) {
