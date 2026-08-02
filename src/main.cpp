@@ -191,10 +191,13 @@ void setup() {
     configureCANFilters();
 
 #if CAN_LOOPBACK_TEST
-    CAN.setLoopbackMode();
-    Serial.println(F("CAN LOOPBACK TEST enabled"));
+    uint8_t lbErr = CAN.setLoopbackMode();
+    Serial.print(F("CAN LOOPBACK TEST enabled err="));
+    Serial.println(lbErr);
 #else
-    CAN.setNormalMode();
+    uint8_t nmErr = CAN.setNormalMode();
+    Serial.print(F("CAN NORMAL err="));
+    Serial.println(nmErr);
 #endif
     Serial.println(F("CAN init done"));
     Serial.print(F("CANCTRL=0x"));
