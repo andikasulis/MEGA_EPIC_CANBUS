@@ -51,6 +51,8 @@ MCP2515 CAN(SPI_CS_PIN);
 
 // Interactive serial logging
 #define SERIAL_LOG_INTERVAL_MS 500
+#define CAN_RX_LOG_INTERVAL_MS 250
+#define CAN_RX_LOG_MAX_PER_INTERVAL 10
 
 struct TxChannelState {
     float lastValue;
@@ -85,6 +87,10 @@ static inline void writeFloat32BigEndian(float value, uint8_t* out) {
 static uint32_t canTxOkCount = 0;
 static uint32_t canTxErrCount = 0;
 
+// Last transmitted frame details for serial logging.
+static int32_t lastTxHash = 0;
+static float   lastTxValue = 0.0f;
+
 static inline uint8_t sendVariableSetFrame(int32_t varHash, float value) {
     txMsg.can_id  = CAN_ID_VARIABLE_SET;
     txMsg.can_dlc = 8;
@@ -93,6 +99,8 @@ static inline uint8_t sendVariableSetFrame(int32_t varHash, float value) {
     uint8_t err = CAN.sendMessage(&txMsg);
     if (err == MCP2515::ERROR_OK) {
         canTxOkCount++;
+        lastTxHash = varHash;
+        lastTxValue = value;
     } else {
         canTxErrCount++;
     }
@@ -110,14 +118,16 @@ static inline uint16_t packDigitalInputs(uint8_t clutchActive) {
 }
 
 static void configureCANFilters() {
-    CAN.setFilterMask(MCP2515::MASK0, false, 0x7FF);
-    CAN.setFilterMask(MCP2515::MASK1, false, 0x7FF);
-    CAN.setFilter(MCP2515::RXF0, false, CAN_ID_VAR_RESPONSE);
-    CAN.setFilter(MCP2515::RXF1, false, CAN_ID_VAR_RESPONSE);
-    CAN.setFilter(MCP2515::RXF2, false, CAN_ID_VAR_RESPONSE);
-    CAN.setFilter(MCP2515::RXF3, false, CAN_ID_VAR_RESPONSE);
-    CAN.setFilter(MCP2515::RXF4, false, CAN_ID_VAR_RESPONSE);
-    CAN.setFilter(MCP2515::RXF5, false, CAN_ID_VAR_RESPONSE);
+    // Promiscuous RX: accept all standard 11-bit frames so we can log/sniff
+    // traffic such as Haltech broadcasts. The EPIC response filter is removed.
+    CAN.setFilterMask(MCP2515::MASK0, false, 0x000);
+    CAN.setFilterMask(MCP2515::MASK1, false, 0x000);
+    CAN.setFilter(MCP2515::RXF0, false, 0x000);
+    CAN.setFilter(MCP2515::RXF1, false, 0x000);
+    CAN.setFilter(MCP2515::RXF2, false, 0x000);
+    CAN.setFilter(MCP2515::RXF3, false, 0x000);
+    CAN.setFilter(MCP2515::RXF4, false, 0x000);
+    CAN.setFilter(MCP2515::RXF5, false, 0x000);
 }
 
 static bool shouldTransmit(TxChannelState* s, unsigned long nowMs) {
@@ -169,14 +179,39 @@ void setup() {
     clutchState.stable    = false;
 }
 
+static void logCanFrame(const struct can_frame& frame) {
+    Serial.print(F("RX "));
+    Serial.print(frame.can_id, HEX);
+    Serial.print(F(" ["));
+    Serial.print(frame.can_dlc);
+    Serial.print(F("] "));
+    for (uint8_t i = 0; i < frame.can_dlc; ++i) {
+        if (frame.data[i] < 0x10) Serial.print('0');
+        Serial.print(frame.data[i], HEX);
+        if (i < frame.can_dlc - 1) Serial.print(' ');
+    }
+    Serial.println();
+}
+
 void loop() {
-    // Optional: drain any incoming frames (not used here).
+    unsigned long nowMs = millis();
+
+    static unsigned long lastRxLogMs = 0;
+    static uint8_t rxLogCount = 0;
     struct can_frame rxMsg;
     while (CAN.readMessage(&rxMsg) == MCP2515::ERROR_OK) {
-        // RX ignored in this minimal sender.
+        if (rxLogCount < CAN_RX_LOG_MAX_PER_INTERVAL &&
+            (nowMs - lastRxLogMs) >= CAN_RX_LOG_INTERVAL_MS) {
+            logCanFrame(rxMsg);
+            rxLogCount++;
+        }
+    }
+    if ((nowMs - lastRxLogMs) >= CAN_RX_LOG_INTERVAL_MS) {
+        lastRxLogMs = nowMs;
+        rxLogCount = 0;
     }
 
-    unsigned long nowMs = millis();
+    nowMs = millis();
 
     static unsigned long lastReadMs = 0;
     if (nowMs - lastReadMs >= TX_READ_INTERVAL_MS) {
@@ -227,6 +262,10 @@ void loop() {
         Serial.print(F(" ERR_ADC="));
         Serial.print(lastAdcErr);
         Serial.print(F(" ERR_CLUTCH="));
-        Serial.println(lastClutchErr);
+        Serial.print(lastClutchErr);
+        Serial.print(F(" LAST_HASH="));
+        Serial.print(lastTxHash, HEX);
+        Serial.print(F(" LAST_VAL="));
+        Serial.println(lastTxValue, 0);
     }
 }
